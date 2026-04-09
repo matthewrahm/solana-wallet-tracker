@@ -1,13 +1,13 @@
 import { Telegraf } from "telegraf";
 import { authMiddleware } from "./auth.js";
 import { addWallet, removeWallet, listWallets } from "./lib/store.js";
-import type { WalletSubscriber } from "./watcher/subscriber.js";
+import type { WalletPoller } from "./watcher/poller.js";
 
 const SOLANA_ADDR_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 export function createBot(
   token: string,
-  getSubscriber: () => WalletSubscriber
+  _getPoller: () => WalletPoller
 ): Telegraf {
   const bot = new Telegraf(token);
 
@@ -51,8 +51,6 @@ export function createBot(
       return ctx.reply("Already watching this wallet.");
     }
 
-    getSubscriber().subscribe(address);
-
     const display = label ? `${label} (${shortAddr(address)})` : shortAddr(address);
     return ctx.reply(
       `👁 Now watching <b>${display}</b>\n\nYou'll receive alerts for all swaps and transfers.`,
@@ -74,7 +72,6 @@ export function createBot(
       return ctx.reply("Wallet not found in your watch list.");
     }
 
-    getSubscriber().unsubscribe(address);
     return ctx.reply(`Stopped watching <code>${shortAddr(address)}</code>.`, {
       parse_mode: "HTML",
     });

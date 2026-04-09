@@ -23,15 +23,19 @@ export class WalletSubscriber {
   }
 
   start(): void {
-    this.connection.connect();
-
     // Subscribe to all wallets from the database
     const wallets = getAllWallets();
-    for (const w of wallets) {
-      this.connection.subscribe(w.address);
-    }
-
     console.log(`Watching ${wallets.length} wallet(s).`);
+
+    if (wallets.length > 0) {
+      // Only connect if there are wallets to watch
+      this.connection.connect();
+      for (const w of wallets) {
+        this.connection.subscribe(w.address);
+      }
+    } else {
+      console.log("No wallets to watch. Use /watch to add one.");
+    }
   }
 
   subscribe(address: string): void {

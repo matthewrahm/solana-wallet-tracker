@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { createBot } from "./bot.js";
-import { WalletSubscriber } from "./watcher/subscriber.js";
+import { WalletPoller } from "./watcher/poller.js";
 
 const token = process.env.BOT_TOKEN;
 
@@ -14,22 +14,22 @@ if (!process.env.HELIUS_API_KEY) {
   process.exit(1);
 }
 
-let subscriber: WalletSubscriber;
+let poller: WalletPoller;
 
-const bot = createBot(token, () => subscriber);
+const bot = createBot(token, () => poller);
 
-subscriber = new WalletSubscriber(bot);
+poller = new WalletPoller(bot);
 
 bot.launch(() => {
   console.log("Wallet Tracker bot is running.");
-  subscriber.start();
+  poller.start();
 });
 
 process.once("SIGINT", () => {
-  subscriber.stop();
+  poller.stop();
   bot.stop("SIGINT");
 });
 process.once("SIGTERM", () => {
-  subscriber.stop();
+  poller.stop();
   bot.stop("SIGTERM");
 });

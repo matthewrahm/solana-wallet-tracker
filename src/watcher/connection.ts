@@ -10,23 +10,42 @@ export class HeliusConnection {
   private onTransaction: TransactionCallback;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingSubscriptions = new Set<string>();
+  private requestIdToAddress = new Map<number, string>();
+  private reconnectDelay = 5_000;
+  private connected = false;
 
   constructor(onTransaction: TransactionCallback) {
     this.onTransaction = onTransaction;
   }
 
   connect(): void {
+    // Clean up any existing connection
+    if (this.ws) {
+      this.ws.removeAllListeners();
+      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+        this.ws.close();
+      }
+      this.ws = null;
+    }
+
     const url = getHeliusWsUrl();
+    console.log("Connecting to Helius WebSocket...");
     this.ws = new WebSocket(url);
 
     this.ws.on("open", () => {
       console.log("Helius WebSocket connected.");
-      // Re-subscribe all addresses after reconnect
-      for (const address of this.subscriptions.keys()) {
+      this.connected = true;
+      this.reconnectDelay = 5_000; // Reset backoff on success
+
+      // Re-subscribe all known addresses
+      const allAddresses = new Set([
+        ...this.subscriptions.keys(),
+        ...this.pendingSubscriptions,
+      ]);
+      this.subscriptions.clear();
+
+      for (const address of allAddresses) {
         this.pendingSubscriptions.add(address);
-        this.sendSubscribe(address);
-      }
-      for (const address of this.pendingSubscriptions) {
         this.sendSubscribe(address);
       }
     });
@@ -46,20 +65,7 @@ export class HeliusConnection {
           return;
         }
 
-        // Transaction notification
-        if (msg.method === "accountNotification" && msg.params) {
-          const subId = msg.params.subscription;
-          const address = this.findAddressBySubId(subId);
-          if (address) {
-            const signature = msg.params.result?.value?.signature
-              ?? msg.params.result?.signature;
-            if (signature) {
-              this.onTransaction(signature, address);
-            }
-          }
-        }
-
-        // Log notification — Helius sends "logsNotification" for account subscriptions
+        // Log notification
         if (msg.method === "logsNotification" && msg.params) {
           const subId = msg.params.subscription;
           const address = this.findAddressBySubId(subId);
@@ -75,13 +81,15 @@ export class HeliusConnection {
       }
     });
 
-    this.ws.on("close", () => {
-      console.log("Helius WebSocket disconnected. Reconnecting in 5s...");
+    this.ws.on("close", (code) => {
+      this.connected = false;
+      console.log(`Helius WebSocket closed (code: ${code}). Reconnecting in ${this.reconnectDelay / 1000}s...`);
       this.scheduleReconnect();
     });
 
     this.ws.on("error", (err) => {
       console.error("Helius WebSocket error:", err.message);
+      // Don't reconnect here — the "close" event will fire after error
     });
   }
 
@@ -91,6 +99,12 @@ export class HeliusConnection {
     }
 
     this.pendingSubscriptions.add(address);
+
+    // Connect if not yet connected
+    if (!this.connected && !this.ws) {
+      this.connect();
+      return;
+    }
 
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.sendSubscribe(address);
@@ -118,7 +132,6 @@ export class HeliusConnection {
 
   private sendSubscribe(address: string): void {
     const id = this.nextId++;
-    // Store the mapping of request ID to address for confirmation handling
     this.requestIdToAddress.set(id, address);
 
     this.ws!.send(
@@ -133,8 +146,6 @@ export class HeliusConnection {
       })
     );
   }
-
-  private requestIdToAddress = new Map<number, string>();
 
   private findPendingAddress(requestId: number): string | undefined {
     const address = this.requestIdToAddress.get(requestId);
@@ -156,11 +167,18 @@ export class HeliusConnection {
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
-    }, 5_000);
+    }, this.reconnectDelay);
+
+    // Exponential backoff: 5s → 10s → 20s → 40s → max 60s
+    this.reconnectDelay = Math.min(this.reconnectDelay * 2, 60_000);
   }
 
   disconnect(): void {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.ws?.removeAllListeners();
     this.ws?.close();
+    this.ws = null;
+    this.connected = false;
   }
 }
