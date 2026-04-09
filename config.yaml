@@ -1,0 +1,5 @@
+# Solana Wallet Tracker Configuration
+
+# Telegram user IDs allowed to use the bot
+allowed_users:
+  - 5866446179
